@@ -1,0 +1,43 @@
+name: AI/ML QA Quality Gate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-validate:
+    name: Test, coverage, and model quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Train deterministic demo model
+        run: python -m training.train
+
+      - name: Run tests and quality report
+        run: python scripts/generate_report.py
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-ml-qa-test-reports
+          path: |
+            reports/junit.xml
+            reports/coverage.xml
+            reports/test_report.json
+          if-no-files-found: warn
+          retention-days: 14

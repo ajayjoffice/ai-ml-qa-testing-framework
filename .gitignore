@@ -1,0 +1,12 @@
+__pycache__/
+.DS_Store
+*.py[cod]
+.venv/
+.pytest_cache/
+.coverage
+reports/coverage.xml
+htmlcov/
+reports/*
+!reports/.gitkeep
+!reports/baseline_metrics.json
+models/*.joblib
