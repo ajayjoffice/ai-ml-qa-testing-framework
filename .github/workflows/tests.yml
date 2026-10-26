@@ -30,6 +30,9 @@ jobs:
       - name: Run tests and quality report
         run: python scripts/generate_report.py
 
+      - name: Evaluate deterministic failure triage
+        run: python -m app.triage.evaluate > reports/triage_eval_report.json
+
       - name: Upload test and coverage reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -39,5 +42,6 @@ jobs:
             reports/junit.xml
             reports/coverage.xml
             reports/test_report.json
+            reports/triage_eval_report.json
           if-no-files-found: warn
           retention-days: 14

@@ -1,12 +1,17 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 
 from app.model import load_model
 from app.preprocessing import build_features
 from app.schemas import CustomerFeatures, PredictionResponse
 from validation.data_validation import validate_customer_data
+from app.triage.api import make_service, router as triage_router, validation_error_handler
 
-app = FastAPI(title="AI/ML QA Testing Framework", version="0.2.0")
+app = FastAPI(title="AI/ML QA Testing Framework", version="2.0.0")
 MODEL_VERSION = "0.2.0"
+app.state.triage_service = make_service()
+app.include_router(triage_router)
+app.add_exception_handler(RequestValidationError, validation_error_handler)
 
 
 @app.get("/health")

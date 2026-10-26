@@ -2,6 +2,8 @@
 
 A small QA project that checks a customer churn prediction service across data validation, model behavior, API responses, regression rules, and CI. The focus is the testing framework; Logistic Regression is a simple example model.
 
+**Version 2.0.0** adds an optional LLM-powered test failure triage workflow to the existing FastAPI QA framework. See [LLM-Powered Test Failure Triage](#10-llm-powered-test-failure-triage) and [CHANGELOG.md](CHANGELOG.md).
+
 ## Table of Contents
 
 1. [Overview](#1-overview)
@@ -13,7 +15,8 @@ A small QA project that checks a customer churn prediction service across data v
 7. [Architecture and Workflow](#7-architecture-and-workflow)
 8. [Results and Evaluation](#8-results-and-evaluation)
 9. [Limitations](#9-limitations)
-10. [Future Improvements](#10-future-improvements)
+10. [LLM-Powered Test Failure Triage](#10-llm-powered-test-failure-triage)
+11. [Future Improvements](#11-future-improvements)
 
 ## 1. Overview
 
@@ -48,6 +51,8 @@ The dataset is licensed under [CC BY 4.0](https://creativecommons.org/licenses/b
 - Regression checks for accuracy, precision, recall, F1, and ROC-AUC, with an F1 tolerance gate.
 - Pytest coverage output, JUnit XML, and a JSON report based on measured runs.
 - GitHub Actions workflow for pull requests and pushes, with report artifacts.
+- An optional LLM-powered test-failure triage API with deterministic fallback, evidence-linked findings, a release gate, and explainable test selection.
+- A synthetic evaluation command for the triage rules that runs locally without an LLM provider or API key.
 
 ## 3. Technology Stack
 
@@ -115,6 +120,10 @@ The local API is available at `http://127.0.0.1:8000`. Interactive OpenAPI docum
 | `GET` | `/health` | Confirms the model artifact can be loaded; returns HTTP 503 when unavailable. |
 | `GET` | `/model-info` | Returns the demo model name, version, and type. |
 | `POST` | `/predict` | Validates one customer record and returns a class and churn probability. |
+| `POST` | `/qa/analyze` | Parses Pytest JUnit XML and returns findings, test-selection recommendations, and a release assessment. |
+| `GET` | `/qa/runs/{run_id}` | Returns a triage result retained in this process's in-memory store. |
+| `GET` | `/qa/runs/{run_id}/release` | Returns the release assessment for a retained run. |
+| `GET` | `/qa/runs/{run_id}/test-selection` | Returns ranked test recommendations for a retained run. |
 
 Example prediction request:
 
@@ -168,6 +177,28 @@ The report command expects the model to exist; train it first. It writes `report
 | --- | --- | --- |
 | `MINIMUM_F1` | `0.60` | Minimum F1 required by model validation and regression acceptance. Must be between 0 and 1. |
 | `MAX_F1_DROP` | `0.02` | Largest F1 decrease allowed relative to the saved regression baseline. Must be between 0 and 1. |
+| `QA_BLOCK_ON_ANY_FAILURE` | `false` | If `true`, any failed or errored test produces a `BLOCK`; otherwise non-critical failures produce `REVIEW`. |
+
+Triage uses deterministic rules unless an OpenAI-compatible chat endpoint is configured with `LLM_BASE_URL`, `LLM_MODEL`, and optionally `LLM_API_KEY`. For a local Ollama-compatible server, set a base URL such as `http://localhost:11434/v1` and a locally served model name. This project does not load `.env` files automatically. If the provider is absent or unavailable, deterministic analysis remains active; generated hypotheses and remediation proposals are unverified.
+
+### Run test-failure triage
+
+Generate a Pytest JUnit report, then post it to the running API (this example uses `jq` to safely embed the XML):
+
+```bash
+python -m pytest --junitxml=reports/junit.xml
+jq -n --rawfile junit reports/junit.xml '{junit_xml: $junit, run_id: "local-run-001"}' | curl -sS http://127.0.0.1:8000/qa/analyze -H 'Content-Type: application/json' --data-binary @-
+```
+
+The optional `build` object can include changed files, available tests, test-to-module mappings, critical tests, repeated-run outcomes, and historical failures/durations. The release gate returns `PASS`, `REVIEW`, or `BLOCK`. Test-selection ranking is explainable and only recommends a subset; it does not replace running the full suite.
+
+Run the deterministic, no-LLM synthetic evaluation:
+
+```bash
+python -m app.triage.evaluate
+```
+
+It reports per-category precision/recall/F1, category accuracy, evidence-grounding rate, insufficient-evidence escalation, release-gate accuracy, runtime, and case results. The small synthetic labels exercise rule behavior and do not estimate performance on real CI failures.
 
 For example, set a different model floor before running the report (a threshold above observed holdout F1 will fail):
 
@@ -193,9 +224,11 @@ MINIMUM_F1=0.75 MAX_F1_DROP=0.01 python scripts/generate_report.py
 │   ├── main.py                     # FastAPI routes and inference orchestration
 │   ├── model.py                    # Cached model loading
 │   ├── preprocessing.py            # Feature order and dataframe conversion
-│   └── schemas.py                  # Pydantic request and response contracts
+│   ├── schemas.py                  # Pydantic request and response contracts
+│   └── triage/                     # JUnit parsing, classification, release rules, optional LLM analysis
 ├── data/
-│   └── raw/Customer Churn.csv      # UCI Iranian Churn dataset (CC BY 4.0)
+│   ├── raw/Customer Churn.csv      # UCI Iranian Churn dataset (CC BY 4.0)
+│   └── triage_eval.json            # Synthetic triage evaluation cases
 ├── models/                         # Generated model artifact (ignored by Git)
 ├── reports/
 │   ├── baseline_metrics.json       # Checked-in regression baseline
@@ -203,6 +236,8 @@ MINIMUM_F1=0.75 MAX_F1_DROP=0.01 python scripts/generate_report.py
 ├── scripts/
 │   └── generate_report.py          # Test, coverage, model, and regression summary
 ├── tests/
+│   ├── fixtures/                   # Example JUnit report
+│   ├── triage/                     # Parser, classifier, API, evaluation, and fallback tests
 │   ├── api/                        # HTTP endpoint behavior
 │   ├── data/                       # Data validation rules
 │   ├── integration/                # End-to-end pipeline and negative cases
@@ -280,8 +315,8 @@ Run `python scripts/generate_report.py` for current measured values. The values 
 
 | Measure | Observed result |
 | --- | ---: |
-| Tests | 44 passed, 0 failed, 0 skipped |
-| Line coverage for `app`, `training`, `validation` | 88.80% |
+| Tests | 69 passed, 0 failed, 0 skipped |
+| Line coverage for `app`, `training`, `validation` | 93.49% |
 | Holdout baseline F1 | 0.618 |
 | Candidate holdout F1 | 0.618 |
 | Candidate accuracy | 0.832 |
@@ -290,7 +325,7 @@ Run `python scripts/generate_report.py` for current measured values. The values 
 | Candidate ROC-AUC | 0.922 |
 | Quality gate | PASSED |
 
-The values above come from the measured run on 2026-10-10 and the checked-in `reports/baseline_metrics.json`. Pytest currently emits one Starlette deprecation warning through FastAPI's test client; it does not fail the suite.
+The test and coverage values above come from the measured run on 2026-10-26; model metrics remain from the checked-in `reports/baseline_metrics.json` and the same deterministic holdout workflow. Pytest emits one Starlette deprecation warning through FastAPI's test client; it does not fail the suite.
 
 <!-- Screenshot placeholder: replace this comment with a screenshot of the generated test report summary. -->
 
@@ -305,6 +340,8 @@ The values above come from the measured run on 2026-10-10 and the checked-in `re
 
 This is a reproducible demonstration on a historical public dataset, not evidence of performance on current customer populations or a business outcome.
 
+The separate synthetic QA-triage evaluation currently passes all 9 authored cases: 1.00 category accuracy over 8 labeled cases, 1.00 evidence-grounding rate, 1.00 insufficient-evidence escalation, and 1.00 release-gate accuracy. These are rule-fixture checks, not real-world accuracy estimates.
+
 ## 9. Limitations
 
 - The dataset is historical and comes from one Iranian telecom company; it may not represent other regions, providers, or current customer behavior.
@@ -318,8 +355,20 @@ This is a reproducible demonstration on a historical public dataset, not evidenc
 - The generated Joblib file is not checked in. A compatible environment must train the artifact before running the service or report command.
 - Dependency ranges are used without a lock file; installed patch versions can change over time.
 - No `LICENSE` file is included, so the repository does not currently declare reuse terms.
+- Triage categories are heuristics based on JUnit evidence, changed-file metadata, and optional history; they are not verified causal diagnoses.
+- Triage results are kept in memory (up to the latest 100 runs) and are lost when the process restarts. There is no authentication, durable store, queue, or multi-worker coordination.
+- The synthetic triage evaluation is small and authored alongside the rules. It must not be described as real-world incident-triage accuracy.
+- LLM output can be malformed or unavailable. Deterministic findings remain available, and generated proposals require human review.
 
-## 10. Future Improvements
+## 10. LLM-Powered Test Failure Triage
+
+This feature extends the same FastAPI application with a focused QA workflow. It parses bounded Pytest JUnit XML, normalizes outcomes and duplicate IDs, extracts message/traceback/source evidence, groups failures with normalized signatures, and generates structured findings. Deterministic rules distinguish application, regression, test-code/assertion, environment, infrastructure, potential-flaky, and insufficient-evidence cases. A flaky label requires mixed outcomes in supplied repeated-run history; a regression label requires changed-file evidence.
+
+Each finding includes category, severity, priority, evidence references, confidence, debugging steps, and a human-review flag. An optional OpenAI-compatible endpoint can enrich the finding with a summary, hypotheses, debugging suggestions, and a remediation proposal. The response is schema-validated, evidence references are checked against the report, and provider errors fall back to deterministic analysis. LLM hypotheses and remediation remain unverified proposals; the system does not apply fixes.
+
+Optional test selection uses changed modules, failure history, criticality, and runtime to rank supplied tests with explanations. The API also provides a transparent release recommendation. Both features are advisory and do not replace the normal full-suite CI run. `python -m app.triage.evaluate` runs the synthetic deterministic evaluation without external calls.
+
+## 11. Future Improvements
 
 - Add a pinned dependency lock file and verify supported Python versions in CI.
 - Add checks for target balance and unexpected changes in the supplied CSV.

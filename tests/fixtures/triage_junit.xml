@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="sample-ci" tests="6" failures="2" errors="2" skipped="1">
+  <testcase classname="app.orders.test_create" name="test_create_valid_order" file="tests/test_orders.py" line="24" time="0.12">
+    <failure message="AssertionError: expected 201, got 500" type="AssertionError">assert response.status_code == 201
+E assert 500 == 201</failure>
+  </testcase>
+  <testcase classname="app.orders.test_update" name="test_update_order" file="tests/test_orders.py" line="41" time="0.08">
+    <failure message="AssertionError: expected 200, got 500" type="AssertionError">assert response.status_code == 200
+E assert 500 == 200</failure>
+  </testcase>
+  <testcase classname="app.config.test_settings" name="test_load_settings" file="tests/test_settings.py" line="11" time="0.02">
+    <error message="APP_REGION environment variable is not set" type="ConfigurationError">ConfigurationError: APP_REGION environment variable is not set</error>
+  </testcase>
+  <testcase classname="app.gateway.test_client" name="test_gateway_response" file="tests/test_gateway.py" line="18" time="2.0">
+    <error message="ConnectionError: connection refused" type="ConnectionError">ConnectionError: connection refused</error>
+  </testcase>
+  <testcase classname="app.health.test_status" name="test_health" file="tests/test_health.py" line="7" time="0.01" />
+  <testcase classname="app.legacy.test_old" name="test_old_contract" file="tests/test_legacy.py" line="33" time="0.0">
+    <skipped message="Not supported on this platform" />
+  </testcase>
+</testsuite>
